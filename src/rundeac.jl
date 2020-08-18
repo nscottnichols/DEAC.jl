@@ -28,6 +28,10 @@ function parse_commandline()
             help = "Maximum frequency to explore."
             arg_type = Float64
             default = 60.0
+        "--first_moment"
+            help = "FIXME First moment."
+            arg_type = Float64
+            default = 1.0
         "--crossover_probability", "-r"
             help = "Initial probability for parent gene to become mutant vector gene."
             arg_type = Float64
@@ -147,6 +151,7 @@ function main()
     stdFitness,P,
     fitnessP,rng,
     crossover_probs,differential_weights = DEAC.deac( tau,isf,err,frequency_bins,
+                           first_moment = parsed_args["first_moment"],
                            temperature = parsed_args["temperature"],
                            number_of_generations = parsed_args["number_of_generations"],
                            population_size = parsed_args["population_size"],
@@ -184,6 +189,7 @@ function main()
          "isf",isf,
          "isf_error",err,
          "frequency",frequency_bins,
+         "first_moment",parsed_args["first_moment"],
          "temperature",parsed_args["temperature"],
          "number_of_generations",parsed_args["number_of_generations"],
          "population_size",parsed_args["population_size"],
