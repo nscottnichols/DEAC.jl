@@ -288,7 +288,8 @@ function deac(  imaginary_time::Array{Float64,1},
     set_inverse_first_moment_fitness(inverse_first_moments, inverse_first_moment, inverse_first_moment_error);
 
     broadcast!((x,y,z)->(((x-y)/z)^2),isf_m,isf,isf_m,isf_error);
-    mean!(fitness',isf_m);
+    #mean!(fitness',isf_m);
+    maximum!(fitness',isf_m);
     
     fitness .+= inverse_first_moments;
     fitness ./= 2;
@@ -346,7 +347,8 @@ function deac(  imaginary_time::Array{Float64,1},
         set_inverse_first_moment_fitness(inverse_first_moments, inverse_first_moment, inverse_first_moment_error);
 
         broadcast!((x,y,z)->(((x-y)/z)^2),isf_m,isf,isf_m,isf_error);
-        mean!(fitness_new',isf_m);
+        #mean!(fitness_new',isf_m);
+        maximum!(fitness_new',isf_m);
         fitness_new .+= inverse_first_moments;
         fitness_new ./= 2;
         fitness_new .+= abs.(1 .- (first_moments ./ first_moment));
