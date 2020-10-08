@@ -228,24 +228,26 @@ function deac(  imaginary_time::Array{Float64,1},
     npop = population_size;
     isf_r = 1.0 ./ isf;
     beta = 1/temperature;
-    st1,st2,st3 = set_simpson_terms_odd(frequency);
-    st1_isf,st2_isf,st3_isf = set_simpson_terms_odd(imaginary_time);
+
     isf_term = set_isf_term(imaginary_time,frequency,beta);
-    isf_term2 = zeros(size(isf_term));
-    isf_m = Array{Float64}(undef,ntau,npop);
+    isf_term2 = copy(isf_term);
 
-    N = size(st1,1);
-    for i in 1:ntau
-        for jj in 1:N
-            j = 2*jj;
-            isf_term2[i,j] += isf_term[i,j]*st1[jj];
-            isf_term2[i,j-1] += isf_term[i,j-1]*st2[jj];
-            isf_term2[i,j+1] += isf_term[i,j+1]*st3[jj]; 
-        end
+    df = frequency[2:end] .- frequency[1:size(frequency,1) - 1];
+    dfrequency = zeros(size(frequency,1));
+    dfrequency2 = zeros(size(frequency,1));
+    for i in 1:(size(frequency,1) - 1)
+        dfrequency[i] = df[i]/2
+        dfrequency2[i+1] = df[i]/2
     end
+    isf_term .*= dfrequency';
+    isf_term2 .*= dfrequency2';
+    
+    isf_m = Array{Float64}(undef,ntau,npop);
+    isf_m2 = Array{Float64}(undef,ntau,npop);
 
-    inverse_first_moment = simpson_nonuniform_odd(isf,st1_isf,st2_isf,st3_isf);
-    inverse_first_moment_error = simpson_nonuniform_odd_error(isf_error,st1_isf,st2_isf,st3_isf);
+
+    #inverse_first_moment = simpson_nonuniform_odd(isf,st1_isf,st2_isf,st3_isf);
+    #inverse_first_moment_error = simpson_nonuniform_odd_error(isf_error,st1_isf,st2_isf,st3_isf);
 
     #Generate population and set initial fitness
 
@@ -256,43 +258,40 @@ function deac(  imaginary_time::Array{Float64,1},
     fitness_new = Array{Float64,1}(undef,npop);
 
     first_moments_factor = frequency .* tanh.((beta/2) .* frequency);
-    first_moments_term = zeros(size(frequency,1));
+    first_moments_term = first_moments_factor .* dfrequency;
+    first_moments_term2 = first_moments_factor .* dfrequency;
     first_moments = Array{Float64,1}(undef,npop);
-    first_moments_new = Array{Float64,1}(undef,npop);
-
-    N = size(st1,1);
-    for jj in 1:N
-        j = 2*jj;
-        first_moments_term[j] += first_moments_factor[j]*st1[jj];
-        first_moments_term[j-1] += first_moments_factor[j-1]*st2[jj];
-        first_moments_term[j+1] += first_moments_factor[j+1]*st3[jj]; 
-    end
+    first_moments2 = Array{Float64,1}(undef,npop);
 
     mul!(first_moments', first_moments_term', P);
+    mul!(first_moments2', first_moments_term2', P);
+    first_moments .+= first_moments2;
     
     #set isf_m and calculate fitness
-    mul!(isf_m,isf_term2,P);
+    mul!(isf_m,isf_term,P);
+    mul!(isf_m2,isf_term2,P);
+    isf_m .+= isf_m2;
     
-    inverse_first_moments = Array{Float64,1}(undef,npop);
-    inverse_first_moments_term = zeros(ntau);
+    #inverse_first_moments = Array{Float64,1}(undef,npop);
+    #inverse_first_moments_term = zeros(ntau);
     
-    N = size(st1_isf,1);
-    for jj in 1:N
-        j = 2*jj;
-        inverse_first_moments_term[j] += st1_isf[jj];
-        inverse_first_moments_term[j-1] += st2_isf[jj];
-        inverse_first_moments_term[j+1] += st3_isf[jj];
-    end
+    #N = size(st1_isf,1);
+    #for jj in 1:N
+    #    j = 2*jj;
+    #    inverse_first_moments_term[j] += st1_isf[jj];
+    #    inverse_first_moments_term[j-1] += st2_isf[jj];
+    #    inverse_first_moments_term[j+1] += st3_isf[jj];
+    #end
 
-    mul!(inverse_first_moments', inverse_first_moments_term', isf_m);
-    set_inverse_first_moment_fitness(inverse_first_moments, inverse_first_moment, inverse_first_moment_error);
+    #mul!(inverse_first_moments', inverse_first_moments_term', isf_m);
+    #set_inverse_first_moment_fitness(inverse_first_moments, inverse_first_moment, inverse_first_moment_error);
 
     broadcast!((x,y,z)->(((x-y)/z)^2),isf_m,isf,isf_m,isf_error);
     mean!(fitness',isf_m);
     
-    fitness .+= inverse_first_moments;
-    fitness ./= 2;
-    fitness .+= abs.(1 .- (first_moments ./ first_moment));
+    #fitness .+= inverse_first_moments;
+    #fitness ./= 2;
+    fitness .+= (first_moments .- first_moment).^2;
 
     crossover_probs = ones(npop) .* crossoverProb;
     differential_weights = ones(npop) .* differentialWeight;
@@ -341,15 +340,21 @@ function deac(  imaginary_time::Array{Float64,1},
 
         #Rejection
         mul!(first_moments', first_moments_term', P_new);
-        mul!(isf_m,isf_term2,P_new);
-        mul!(inverse_first_moments', inverse_first_moments_term', isf_m);
-        set_inverse_first_moment_fitness(inverse_first_moments, inverse_first_moment, inverse_first_moment_error);
+        mul!(first_moments2', first_moments_term2', P_new);
+        first_moments .+= first_moments2;
+
+        mul!(isf_m,isf_term,P_new);
+        mul!(isf_m2,isf_term2,P_new);
+        isf_m .+= isf_m2;
+
+        #mul!(inverse_first_moments', inverse_first_moments_term', isf_m);
+        #set_inverse_first_moment_fitness(inverse_first_moments, inverse_first_moment, inverse_first_moment_error);
 
         broadcast!((x,y,z)->(((x-y)/z)^2),isf_m,isf,isf_m,isf_error);
         mean!(fitness_new',isf_m);
-        fitness_new .+= inverse_first_moments;
-        fitness_new ./= 2;
-        fitness_new .+= abs.(1 .- (first_moments ./ first_moment));
+        #fitness_new .+= inverse_first_moments;
+        #fitness_new ./= 2;
+        fitness_new .+= (first_moments .- first_moment).^2;
 
         reject(rng,rInd,fitness_new,fitness);
         replace_pop(P,P_new,rInd);
@@ -361,7 +366,7 @@ function deac(  imaginary_time::Array{Float64,1},
     #Set best candidate solution from final generation
     minidx = argmin(fitness);
     set_minP(minP,P,minidx);
-    println("test: $(first_moments[minidx])");
+    #println("test: $(first_moments[minidx])");
 
     minS = minP./(1 .+ exp.(-beta .* frequency)); #FIXME
     
