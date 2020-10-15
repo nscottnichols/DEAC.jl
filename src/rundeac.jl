@@ -83,6 +83,13 @@ function parse_commandline()
             help = "Directory to save results in."
             arg_type = String
             default = "./deacresults"
+        "--track_stats"
+            help = "Track minimum fitness and other stats."
+            action = :store_true
+        "--number_of_blas_threads"
+            help = "Number of BLAS threads to utilize if > 0 otherwise uses Julia default value."
+            arg_type = Int64
+            default = 0
         "qmc_data"
             help = "File containing quantum Monte Carlo data with columns: IMAGINARY_TIME, INTERMEDIATE_SCATTERING_FUNCTION, ERROR"
             arg_type = String
@@ -97,6 +104,7 @@ function checkMoves(argname::String,s::Array{String,1},l::Array{String,1})
         checkMoves(argname,ss,l)
     end
 end
+
 function checkMoves(argname::String,s::String,l::Array{String,1})
     if !(s in l)
         print("$s is not a valid parameter for $argname. Valid parameters are: ")
@@ -146,7 +154,7 @@ function main()
     isf = qmcdata["isf"];
     err = qmcdata["error"];
 
-    u4,omega,minS,minP,
+    u4,omega,minS,minP,minFit,
     avgFitness,minFitness,
     stdFitness,P,
     fitnessP,rng,
@@ -163,7 +171,9 @@ function main()
                            SAdifferentialWeight = parsed_args["self_adapting_differential_weight"],
                            rejectFunc = parsed_args["reject"],
                            stop_minimum_fitness = parsed_args["stop_minimum_fitness"],
-                           seed = parsed_args["seed"])
+                           seed = parsed_args["seed"],
+                           track_stats = parsed_args["track_stats"],
+                           number_of_blas_threads = parsed_args["number_of_blas_threads"])
     seed = lpad(parsed_args["seed"],4,'0');
     elapsed = time() - start;
     filename = "$(save_dir)/deac_results_$(seed)_$u4.jld";
@@ -173,14 +183,19 @@ function main()
          "frequency",omega,
          "dsf",minS,
          "minP",minP,
+         "minFit",minFit,
          "elapsed_time",elapsed);
-    filename = "$(save_dir)/deac_stats_$(seed)_$u4.jld";
-    println("Saving stats to $filename");
-    save(filename,
-         "u4",u4,
-         "avgFitness",avgFitness,
-         "minFitness",minFitness,
-         "stdFitness",stdFitness)
+
+    if parsed_args["track_stats"]
+        filename = "$(save_dir)/deac_stats_$(seed)_$u4.jld";
+        println("Saving stats to $filename");
+        save(filename,
+             "u4",u4,
+             "avgFitness",avgFitness,
+             "minFitness",minFitness,
+             "stdFitness",stdFitness)
+    end
+
     filename = "$(save_dir)/deac_params_$(seed)_$u4.jld";
     println("Saving parameters to $filename");
     save(filename,

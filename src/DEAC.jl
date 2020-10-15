@@ -213,7 +213,16 @@ function deac(  imaginary_time::Array{Float64,1},
                 SAdifferentialWeight::Float64=0.9,
                 rejectFunc::String="smallerFit",
                 stop_minimum_fitness::Float64 = 1.0e-8,
-                seed::Int64=1)
+                seed::Int64 = 1,
+                track_stats::Bool = false,
+                number_of_blas_threads::Int64 = 0)
+
+    #_bts = ccall((:openblas_get_num_threads64_, Base.libblas_name), Cint, ())
+    #println("Number of BLAS threads: $(_bts)");
+    if number_of_blas_threads > 0
+        LinearAlgebra.BLAS.set_num_threads(number_of_blas_threads)
+    end
+
     reject = getfield(DEACreject, Symbol(rejectFunc));
     
     #Set uuid
@@ -229,6 +238,7 @@ function deac(  imaginary_time::Array{Float64,1},
     isf_r = 1.0 ./ isf;
     beta = 1/temperature;
 
+    moment0=isf[1];
     isf_term = set_isf_term(imaginary_time,frequency,beta);
     isf_term2 = copy(isf_term);
 
@@ -253,6 +263,16 @@ function deac(  imaginary_time::Array{Float64,1},
 
     P = Array{Float64,2}(undef,ndsf,npop);
     P = rand!(rng,P);
+
+    # Normalize population
+    normalization1 = Array{Float64,1}(undef,npop);
+    normalization2 = Array{Float64,1}(undef,npop);
+    mul!(normalization1,P',dfrequency);
+    mul!(normalization2,P',dfrequency2);
+    normalization1 .+= normalization2;
+    normalization1 ./= moment0;
+    P ./= normalization1';
+
     P_new = Array{Float64,2}(undef,ndsf,npop);
     fitness = zeros(npop);
     fitness_new = Array{Float64,1}(undef,npop);
@@ -299,9 +319,12 @@ function deac(  imaginary_time::Array{Float64,1},
     new_differential_weights = Array{Float64,1}(undef,npop);
     
     #Initialize statistics arrays
-    avgFitness = zeros(number_of_generations);
-    minFitness = zeros(number_of_generations);
-    stdFitness = zeros(number_of_generations);
+    
+    if track_stats
+        avgFitness = zeros(number_of_generations);
+        minFitness = zeros(number_of_generations);
+        stdFitness = zeros(number_of_generations);
+    end
 
     #Crude Preallocation
     mIdx = trues(ndsf,npop);
@@ -321,9 +344,11 @@ function deac(  imaginary_time::Array{Float64,1},
         stdFit = std(fitness,mean=avgFit);
 
         #Get Statistics
-        avgFitness[generation] = avgFit;
-        minFitness[generation] = minFit;
-        stdFitness[generation] = stdFit;
+        if track_stats
+            avgFitness[generation] = avgFit;
+            minFitness[generation] = minFit;
+            stdFitness[generation] = stdFit;
+        end
 
         #Stopping criteria
         if minFit <= stop_minimum_fitness
@@ -337,6 +362,13 @@ function deac(  imaginary_time::Array{Float64,1},
         #Set mutant population FIXME crossover built-in here do I want this?
         set_mutateInd(rng,mIdx,new_crossover_probs);
         mutate(rng,P_new,P,mIdx,new_differential_weights);
+
+        # Normalization
+        mul!(normalization1,P_new',dfrequency);
+        mul!(normalization2,P_new',dfrequency2);
+        normalization1 .+= normalization2;
+        normalization1 ./= moment0;
+        P_new ./= normalization1';
 
         #Rejection
         mul!(first_moments', first_moments_term', P_new);
@@ -368,8 +400,11 @@ function deac(  imaginary_time::Array{Float64,1},
     set_minP(minP,P,minidx);
     #println("test: $(first_moments[minidx])");
 
-    minS = minP./(1 .+ exp.(-beta .* frequency)); #FIXME
-    
-    u4,frequency,minS,minP,avgFitness[1:generation],minFitness[1:generation],stdFitness[1:generation],P,fitness,rng,crossover_probs,differential_weights
+    minS = minP./(1 .+ exp.(-beta .* frequency)); 
+    println(minimum(fitness));
+    if track_stats
+        return u4,frequency,minS,minP,minimum(fitness),avgFitness[1:generation],minFitness[1:generation],stdFitness[1:generation],P,fitness,rng,crossover_probs,differential_weights
+    end
+    return u4,frequency,minS,minP,minimum(fitness),zeros(2),zeros(2),zeros(2),P,fitness,rng,crossover_probs,differential_weights
 end
 end
