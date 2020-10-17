@@ -279,7 +279,7 @@ function deac(  imaginary_time::Array{Float64,1},
 
     first_moments_factor = frequency .* tanh.((beta/2) .* frequency);
     first_moments_term = first_moments_factor .* dfrequency;
-    first_moments_term2 = first_moments_factor .* dfrequency;
+    first_moments_term2 = first_moments_factor .* dfrequency2;
     first_moments = Array{Float64,1}(undef,npop);
     first_moments2 = Array{Float64,1}(undef,npop);
 
