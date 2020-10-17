@@ -249,11 +249,13 @@ function deac(  imaginary_time::Array{Float64,1},
         dfrequency[i] = df[i]/2
         dfrequency2[i+1] = df[i]/2
     end
+    dfrequency3 = dfrequency .+ dfrequency2;
+
     isf_term .*= dfrequency';
     isf_term2 .*= dfrequency2';
+    isf_term .+= isf_term2;
     
     isf_m = Array{Float64}(undef,ntau,npop);
-    isf_m2 = Array{Float64}(undef,ntau,npop);
 
     #Generate population and set initial fitness
 
@@ -261,13 +263,10 @@ function deac(  imaginary_time::Array{Float64,1},
     P = rand!(rng,P);
 
     # Normalize population
-    normalization1 = Array{Float64,1}(undef,npop);
-    normalization2 = Array{Float64,1}(undef,npop);
-    mul!(normalization1,P',dfrequency);
-    mul!(normalization2,P',dfrequency2);
-    normalization1 .+= normalization2;
-    normalization1 ./= moment0;
-    P ./= normalization1';
+    normalization = Array{Float64,1}(undef,npop);
+    mul!(normalization,P',dfrequency3);
+    normalization ./= moment0;
+    P ./= normalization';
 
     P_new = Array{Float64,2}(undef,ndsf,npop);
     fitness = zeros(npop);
@@ -276,20 +275,16 @@ function deac(  imaginary_time::Array{Float64,1},
     first_moments_factor = frequency .* tanh.((beta/2) .* frequency);
     first_moments_term = first_moments_factor .* dfrequency;
     first_moments_term2 = first_moments_factor .* dfrequency2;
+    first_moments_term .+= first_moments_term2;
+
     first_moments = Array{Float64,1}(undef,npop);
-    first_moments2 = Array{Float64,1}(undef,npop);
 
     mul!(first_moments', first_moments_term', P);
-    mul!(first_moments2', first_moments_term2', P);
     #FIXME see if faster
     #mul!(first_moments, P', first_moments_term);
-    #mul!(first_moments2, P', first_moments_term2);
-    first_moments .+= first_moments2;
     
     #set isf_m and calculate fitness
     mul!(isf_m,isf_term,P);
-    mul!(isf_m2,isf_term2,P);
-    isf_m .+= isf_m2;
     
     #dt = imaginary_time[2:end] .- imaginary_time[1:size(imaginary_time,1) - 1];
     #dimaginary_time = zeros(size(imaginary_time,1));
@@ -362,20 +357,15 @@ function deac(  imaginary_time::Array{Float64,1},
         mutate(rng,P_new,P,mIdx,new_differential_weights);
 
         # Normalization
-        mul!(normalization1,P_new',dfrequency);
-        mul!(normalization2,P_new',dfrequency2);
-        normalization1 .+= normalization2;
-        normalization1 ./= moment0;
-        P_new ./= normalization1';
+        mul!(normalization,P_new',dfrequency3);
+        normalization ./= moment0;
+        P_new ./= normalization';
 
         #Rejection
         mul!(first_moments', first_moments_term', P_new);
-        mul!(first_moments2', first_moments_term2', P_new);
-        first_moments .+= first_moments2;
 
         mul!(isf_m,isf_term,P_new);
-        mul!(isf_m2,isf_term2,P_new);
-        isf_m .+= isf_m2;
+
         #mul!(inverse_first_moments,isf_m',dimaginary_time);
 
         broadcast!((x,y,z)->(((x-y)/z)^2),isf_m,isf,isf_m,isf_error);
