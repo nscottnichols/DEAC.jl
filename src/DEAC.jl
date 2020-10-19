@@ -286,24 +286,25 @@ function deac(  imaginary_time::Array{Float64,1},
     #set isf_m and calculate fitness
     mul!(isf_m,isf_term,P);
     
-    #dt = imaginary_time[2:end] .- imaginary_time[1:size(imaginary_time,1) - 1];
-    #dimaginary_time = zeros(size(imaginary_time,1));
-    #dimaginary_time2 = zeros(size(imaginary_time,1));
-    #for i in 1:(size(imaginary_time,1) - 1)
-    #    dimaginary_time[i] = dt[i]/2
-    #    dimaginary_time2[i+1] = dt[i]/2
-    #end
-    #dimaginary_time .+= dimaginary_time2;
-    #inverse_first_moment = dot(isf,dimaginary_time);
-    #inverse_first_moment_error = sqrt(dot(isf_error.^2,dimaginary_time.^2));
-    #inverse_first_moments = Array{Float64,1}(undef,npop);
-    #mul!(inverse_first_moments,isf_m',dimaginary_time);
+    dt = imaginary_time[2:end] .- imaginary_time[1:size(imaginary_time,1) - 1];
+    dimaginary_time = zeros(size(imaginary_time,1));
+    dimaginary_time2 = zeros(size(imaginary_time,1));
+    for i in 1:(size(imaginary_time,1) - 1)
+        dimaginary_time[i] = dt[i]/2
+        dimaginary_time2[i+1] = dt[i]/2
+    end
+    dimaginary_time .+= dimaginary_time2;
+    inverse_first_moment = dot(isf,dimaginary_time);
+    inverse_first_moment_error = sqrt(dot(isf_error.^2,dimaginary_time.^2));
+    inverse_first_moments = Array{Float64,1}(undef,npop);
+    mul!(inverse_first_moments,isf_m',dimaginary_time);
 
     broadcast!((x,y,z)->(((x-y)/z)^2),isf_m,isf,isf_m,isf_error);
     mean!(fitness',isf_m);
+
+    broadcast!((x,y,z)->(((x-y)/z)^2),inverse_first_moments,inverse_first_moment,inverse_first_moments,inverse_first_moment_error);
     
-    #fitness .+= inverse_first_moments;
-    #fitness ./= 2;
+    fitness .+= inverse_first_moments;
     fitness .+= (first_moments .- first_moment).^2;
 
     crossover_probs = ones(npop) .* crossoverProb;
@@ -366,12 +367,14 @@ function deac(  imaginary_time::Array{Float64,1},
 
         mul!(isf_m,isf_term,P_new);
 
-        #mul!(inverse_first_moments,isf_m',dimaginary_time);
+        mul!(inverse_first_moments,isf_m',dimaginary_time);
 
         broadcast!((x,y,z)->(((x-y)/z)^2),isf_m,isf,isf_m,isf_error);
         mean!(fitness_new',isf_m);
-        #fitness_new .+= inverse_first_moments;
-        #fitness_new ./= 2;
+
+        broadcast!((x,y,z)->(((x-y)/z)^2),inverse_first_moments,inverse_first_moment,inverse_first_moments,inverse_first_moment_error);
+
+        fitness_new .+= inverse_first_moments;
         fitness_new .+= (first_moments .- first_moment).^2;
 
         reject(rng,rInd,fitness_new,fitness);
@@ -384,7 +387,6 @@ function deac(  imaginary_time::Array{Float64,1},
     #Set best candidate solution from final generation
     minidx = argmin(fitness);
     set_minP(minP,P,minidx);
-    #println("test: $(first_moments[minidx])");
 
     minS = minP./(1 .+ exp.(-beta .* frequency)); 
     println(minimum(fitness));
