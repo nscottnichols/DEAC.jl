@@ -392,7 +392,8 @@ function deac(  imaginary_time::Array{Float64,1},
             mul!(normalization,P_new',dfrequency3);
             normalization ./= moment0;
             P_new ./= normalization';
-
+        end
+        
         #Rejection
         if first_moment > 0.0
             mul!(first_moments', first_moments_term', P_new);
@@ -414,6 +415,8 @@ function deac(  imaginary_time::Array{Float64,1},
         if use_inverse_first_moment
             broadcast!((x,y,z)->(((x-y)/z)^2),inverse_first_moments,inverse_first_moment,inverse_first_moments,inverse_first_moment_error);
             fitness_new .+= inverse_first_moments;
+        end
+        
         if first_moment > 0.0
             fitness_new .+= (first_moments .- first_moment).^2;
         end
