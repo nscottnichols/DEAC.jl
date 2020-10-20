@@ -201,7 +201,11 @@ function deac(  imaginary_time::Array{Float64,1},
                 isf::Array{Float64,1},
                 isf_error::Array{Float64,1},
                 frequency::Array{Float64,1};
-                first_moment = 1.0,
+                normalize::Bool = false,
+                use_inverse_first_moment::Bool = false,
+                first_moment::Float64 = -1.0,
+                third_moment::Float64 = -1.0,
+                third_moment_error::Float64 = 0.01,
                 temperature::Float64 = 1.2,
                 number_of_generations::Int64 = 1000,
                 population_size::Int64 = 512,
@@ -213,7 +217,16 @@ function deac(  imaginary_time::Array{Float64,1},
                 SAdifferentialWeight::Float64=0.9,
                 rejectFunc::String="smallerFit",
                 stop_minimum_fitness::Float64 = 1.0e-8,
-                seed::Int64=1)
+                seed::Int64 = 1,
+                track_stats::Bool = false,
+                number_of_blas_threads::Int64 = 0)
+
+    #_bts = ccall((:openblas_get_num_threads64_, Base.libblas_name), Cint, ())
+    #println("Number of BLAS threads: $(_bts)");
+    if number_of_blas_threads > 0
+        LinearAlgebra.BLAS.set_num_threads(number_of_blas_threads)
+    end
+
     reject = getfield(DEACreject, Symbol(rejectFunc));
     
     #Set uuid
@@ -228,71 +241,101 @@ function deac(  imaginary_time::Array{Float64,1},
     npop = population_size;
     isf_r = 1.0 ./ isf;
     beta = 1/temperature;
-    st1,st2,st3 = set_simpson_terms_odd(frequency);
-    st1_isf,st2_isf,st3_isf = set_simpson_terms_odd(imaginary_time);
+
+    moment0=isf[1];
     isf_term = set_isf_term(imaginary_time,frequency,beta);
-    isf_term2 = zeros(size(isf_term));
-    isf_m = Array{Float64}(undef,ntau,npop);
+    isf_term2 = copy(isf_term);
 
-    N = size(st1,1);
-    for i in 1:ntau
-        for jj in 1:N
-            j = 2*jj;
-            isf_term2[i,j] += isf_term[i,j]*st1[jj];
-            isf_term2[i,j-1] += isf_term[i,j-1]*st2[jj];
-            isf_term2[i,j+1] += isf_term[i,j+1]*st3[jj]; 
-        end
+    df = frequency[2:end] .- frequency[1:size(frequency,1) - 1];
+    dfrequency = zeros(size(frequency,1));
+    dfrequency2 = zeros(size(frequency,1));
+    for i in 1:(size(frequency,1) - 1)
+        dfrequency[i] = df[i]/2
+        dfrequency2[i+1] = df[i]/2
     end
+    dfrequency3 = dfrequency .+ dfrequency2;
 
-    inverse_first_moment = simpson_nonuniform_odd(isf,st1_isf,st2_isf,st3_isf);
-    inverse_first_moment_error = simpson_nonuniform_odd_error(isf_error,st1_isf,st2_isf,st3_isf);
+    isf_term .*= dfrequency';
+    isf_term2 .*= dfrequency2';
+    isf_term .+= isf_term2;
+    
+    isf_m = Array{Float64}(undef,ntau,npop);
 
     #Generate population and set initial fitness
 
     P = Array{Float64,2}(undef,ndsf,npop);
     P = rand!(rng,P);
+
+    # Normalize population
+    if normalize
+        normalization = Array{Float64,1}(undef,npop);
+        mul!(normalization,P',dfrequency3);
+        normalization ./= moment0;
+        P ./= normalization';
+    end
     P_new = Array{Float64,2}(undef,ndsf,npop);
     fitness = zeros(npop);
     fitness_new = Array{Float64,1}(undef,npop);
 
-    first_moments_factor = frequency .* tanh.((beta/2) .* frequency);
-    first_moments_term = zeros(size(frequency,1));
-    first_moments = Array{Float64,1}(undef,npop);
-    first_moments_new = Array{Float64,1}(undef,npop);
+    if first_moment > 0.0
+        first_moments_factor = frequency .* tanh.((beta/2) .* frequency);
+        first_moments_term = first_moments_factor .* dfrequency;
+        first_moments_term2 = first_moments_factor .* dfrequency2;
+        first_moments_term .+= first_moments_term2;
 
-    N = size(st1,1);
-    for jj in 1:N
-        j = 2*jj;
-        first_moments_term[j] += first_moments_factor[j]*st1[jj];
-        first_moments_term[j-1] += first_moments_factor[j-1]*st2[jj];
-        first_moments_term[j+1] += first_moments_factor[j+1]*st3[jj]; 
+        first_moments = Array{Float64,1}(undef,npop);
+
+        mul!(first_moments', first_moments_term', P);
+        #FIXME see if faster
+        #mul!(first_moments, P', first_moments_term);
     end
 
-    mul!(first_moments', first_moments_term', P);
+    if third_moment > 0.0
+        third_moments_factor = (frequency .^ 3) .* tanh.((beta/2) .* frequency);
+        third_moments_term = third_moments_factor .* dfrequency;
+        third_moments_term2 = third_moments_factor .* dfrequency2;
+        third_moments_term .+= third_moments_term2;
+
+        third_moments = Array{Float64,1}(undef,npop);
+
+        mul!(third_moments', third_moments_term', P);
+        #FIXME see if faster
+        #mul!(third_moments, P', third_moments_term);
+    end
     
     #set isf_m and calculate fitness
-    mul!(isf_m,isf_term2,P);
+    mul!(isf_m,isf_term,P);
     
-    inverse_first_moments = Array{Float64,1}(undef,npop);
-    inverse_first_moments_term = zeros(ntau);
-    
-    N = size(st1_isf,1);
-    for jj in 1:N
-        j = 2*jj;
-        inverse_first_moments_term[j] += st1_isf[jj];
-        inverse_first_moments_term[j-1] += st2_isf[jj];
-        inverse_first_moments_term[j+1] += st3_isf[jj];
+    if use_inverse_first_moment
+        dt = imaginary_time[2:end] .- imaginary_time[1:size(imaginary_time,1) - 1];
+        dimaginary_time = zeros(size(imaginary_time,1));
+        dimaginary_time2 = zeros(size(imaginary_time,1));
+        for i in 1:(size(imaginary_time,1) - 1)
+            dimaginary_time[i] = dt[i]/2
+            dimaginary_time2[i+1] = dt[i]/2
+        end
+        dimaginary_time .+= dimaginary_time2;
+        inverse_first_moment = dot(isf,dimaginary_time);
+        inverse_first_moment_error = sqrt(dot(isf_error.^2,dimaginary_time.^2));
+        inverse_first_moments = Array{Float64,1}(undef,npop);
+        mul!(inverse_first_moments,isf_m',dimaginary_time);
     end
-
-    mul!(inverse_first_moments', inverse_first_moments_term', isf_m);
-    set_inverse_first_moment_fitness(inverse_first_moments, inverse_first_moment, inverse_first_moment_error);
 
     broadcast!((x,y,z)->(((x-y)/z)^2),isf_m,isf,isf_m,isf_error);
     mean!(fitness',isf_m);
-    
-    fitness .+= inverse_first_moments;
-    fitness ./= 2;
-    fitness .+= abs.(1 .- (first_moments ./ first_moment));
+
+    if use_inverse_first_moment
+        broadcast!((x,y,z)->(((x-y)/z)^2),inverse_first_moments,inverse_first_moment,inverse_first_moments,inverse_first_moment_error);
+        fitness .+= inverse_first_moments;
+    end
+
+    if first_moment > 0.0
+        fitness .+= (first_moments .- first_moment).^2;
+    end
+    if third_moment > 0.0
+        broadcast!((x,y,z)->(((x-y)/z)^2),third_moments,third_moment,third_moments,third_moment_error);
+        fitness .+= third_moments;
+    end
 
     crossover_probs = ones(npop) .* crossoverProb;
     differential_weights = ones(npop) .* differentialWeight;
@@ -300,9 +343,12 @@ function deac(  imaginary_time::Array{Float64,1},
     new_differential_weights = Array{Float64,1}(undef,npop);
     
     #Initialize statistics arrays
-    avgFitness = zeros(number_of_generations);
-    minFitness = zeros(number_of_generations);
-    stdFitness = zeros(number_of_generations);
+    
+    if track_stats
+        avgFitness = zeros(number_of_generations);
+        minFitness = zeros(number_of_generations);
+        stdFitness = zeros(number_of_generations);
+    end
 
     #Crude Preallocation
     mIdx = trues(ndsf,npop);
@@ -322,9 +368,11 @@ function deac(  imaginary_time::Array{Float64,1},
         stdFit = std(fitness,mean=avgFit);
 
         #Get Statistics
-        avgFitness[generation] = avgFit;
-        minFitness[generation] = minFit;
-        stdFitness[generation] = stdFit;
+        if track_stats
+            avgFitness[generation] = avgFit;
+            minFitness[generation] = minFit;
+            stdFitness[generation] = stdFit;
+        end
 
         #Stopping criteria
         if minFit <= stop_minimum_fitness
@@ -339,17 +387,41 @@ function deac(  imaginary_time::Array{Float64,1},
         set_mutateInd(rng,mIdx,new_crossover_probs);
         mutate(rng,P_new,P,mIdx,new_differential_weights);
 
+        # Normalization
+        if normalize
+            mul!(normalization,P_new',dfrequency3);
+            normalization ./= moment0;
+            P_new ./= normalization';
+
         #Rejection
-        mul!(first_moments', first_moments_term', P_new);
-        mul!(isf_m,isf_term2,P_new);
-        mul!(inverse_first_moments', inverse_first_moments_term', isf_m);
-        set_inverse_first_moment_fitness(inverse_first_moments, inverse_first_moment, inverse_first_moment_error);
+        if first_moment > 0.0
+            mul!(first_moments', first_moments_term', P_new);
+        end
+
+        if third_moment > 0.0
+            mul!(third_moments', third_moments_term', P_new);
+        end
+
+        mul!(isf_m,isf_term,P_new);
+
+        if use_inverse_first_moment
+            mul!(inverse_first_moments,isf_m',dimaginary_time);
+        end
 
         broadcast!((x,y,z)->(((x-y)/z)^2),isf_m,isf,isf_m,isf_error);
         mean!(fitness_new',isf_m);
-        fitness_new .+= inverse_first_moments;
-        fitness_new ./= 2;
-        fitness_new .+= abs.(1 .- (first_moments ./ first_moment));
+
+        if use_inverse_first_moment
+            broadcast!((x,y,z)->(((x-y)/z)^2),inverse_first_moments,inverse_first_moment,inverse_first_moments,inverse_first_moment_error);
+            fitness_new .+= inverse_first_moments;
+        if first_moment > 0.0
+            fitness_new .+= (first_moments .- first_moment).^2;
+        end
+
+        if third_moment > 0.0
+            broadcast!((x,y,z)->(((x-y)/z)^2),third_moments,third_moment,third_moments,third_moment_error);
+            fitness_new .+= third_moments;
+        end
 
         reject(rng,rInd,fitness_new,fitness);
         replace_pop(P,P_new,rInd);
@@ -361,10 +433,12 @@ function deac(  imaginary_time::Array{Float64,1},
     #Set best candidate solution from final generation
     minidx = argmin(fitness);
     set_minP(minP,P,minidx);
-    println("test: $(first_moments[minidx])");
 
-    minS = minP./(1 .+ exp.(-beta .* frequency)); #FIXME
-    
-    u4,frequency,minS,minP,avgFitness[1:generation],minFitness[1:generation],stdFitness[1:generation],P,fitness,rng,crossover_probs,differential_weights
+    minS = minP./(1 .+ exp.(-beta .* frequency)); 
+    println(minimum(fitness));
+    if track_stats
+        return u4,frequency,minS,minP,minimum(fitness),avgFitness[1:generation],minFitness[1:generation],stdFitness[1:generation],P,fitness,rng,crossover_probs,differential_weights
+    end
+    return u4,frequency,minS,minP,minimum(fitness),zeros(2),zeros(2),zeros(2),P,fitness,rng,crossover_probs,differential_weights
 end
 end
