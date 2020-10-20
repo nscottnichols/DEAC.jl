@@ -201,7 +201,11 @@ function deac(  imaginary_time::Array{Float64,1},
                 isf::Array{Float64,1},
                 isf_error::Array{Float64,1},
                 frequency::Array{Float64,1};
-                first_moment = 1.0,
+                normalize::Bool = false,
+                use_inverse_first_moment::Bool = false,
+                first_moment::Float64 = -1.0,
+                third_moment::Float64 = -1.0,
+                third_moment_error::Float64 = 0.01,
                 temperature::Float64 = 1.2,
                 number_of_generations::Int64 = 1000,
                 population_size::Int64 = 512,
@@ -263,49 +267,75 @@ function deac(  imaginary_time::Array{Float64,1},
     P = rand!(rng,P);
 
     # Normalize population
-    normalization = Array{Float64,1}(undef,npop);
-    mul!(normalization,P',dfrequency3);
-    normalization ./= moment0;
-    P ./= normalization';
-
+    if normalize
+        normalization = Array{Float64,1}(undef,npop);
+        mul!(normalization,P',dfrequency3);
+        normalization ./= moment0;
+        P ./= normalization';
+    end
     P_new = Array{Float64,2}(undef,ndsf,npop);
     fitness = zeros(npop);
     fitness_new = Array{Float64,1}(undef,npop);
 
-    first_moments_factor = frequency .* tanh.((beta/2) .* frequency);
-    first_moments_term = first_moments_factor .* dfrequency;
-    first_moments_term2 = first_moments_factor .* dfrequency2;
-    first_moments_term .+= first_moments_term2;
+    if first_moment > 0.0
+        first_moments_factor = frequency .* tanh.((beta/2) .* frequency);
+        first_moments_term = first_moments_factor .* dfrequency;
+        first_moments_term2 = first_moments_factor .* dfrequency2;
+        first_moments_term .+= first_moments_term2;
 
-    first_moments = Array{Float64,1}(undef,npop);
+        first_moments = Array{Float64,1}(undef,npop);
 
-    mul!(first_moments', first_moments_term', P);
-    #FIXME see if faster
-    #mul!(first_moments, P', first_moments_term);
+        mul!(first_moments', first_moments_term', P);
+        #FIXME see if faster
+        #mul!(first_moments, P', first_moments_term);
+    end
+
+    if third_moment > 0.0
+        third_moments_factor = (frequency .^ 3) .* tanh.((beta/2) .* frequency);
+        third_moments_term = third_moments_factor .* dfrequency;
+        third_moments_term2 = third_moments_factor .* dfrequency2;
+        third_moments_term .+= third_moments_term2;
+
+        third_moments = Array{Float64,1}(undef,npop);
+
+        mul!(third_moments', third_moments_term', P);
+        #FIXME see if faster
+        #mul!(third_moments, P', third_moments_term);
+    end
     
     #set isf_m and calculate fitness
     mul!(isf_m,isf_term,P);
     
-    dt = imaginary_time[2:end] .- imaginary_time[1:size(imaginary_time,1) - 1];
-    dimaginary_time = zeros(size(imaginary_time,1));
-    dimaginary_time2 = zeros(size(imaginary_time,1));
-    for i in 1:(size(imaginary_time,1) - 1)
-        dimaginary_time[i] = dt[i]/2
-        dimaginary_time2[i+1] = dt[i]/2
+    if use_inverse_first_moment
+        dt = imaginary_time[2:end] .- imaginary_time[1:size(imaginary_time,1) - 1];
+        dimaginary_time = zeros(size(imaginary_time,1));
+        dimaginary_time2 = zeros(size(imaginary_time,1));
+        for i in 1:(size(imaginary_time,1) - 1)
+            dimaginary_time[i] = dt[i]/2
+            dimaginary_time2[i+1] = dt[i]/2
+        end
+        dimaginary_time .+= dimaginary_time2;
+        inverse_first_moment = dot(isf,dimaginary_time);
+        inverse_first_moment_error = sqrt(dot(isf_error.^2,dimaginary_time.^2));
+        inverse_first_moments = Array{Float64,1}(undef,npop);
+        mul!(inverse_first_moments,isf_m',dimaginary_time);
     end
-    dimaginary_time .+= dimaginary_time2;
-    inverse_first_moment = dot(isf,dimaginary_time);
-    inverse_first_moment_error = sqrt(dot(isf_error.^2,dimaginary_time.^2));
-    inverse_first_moments = Array{Float64,1}(undef,npop);
-    mul!(inverse_first_moments,isf_m',dimaginary_time);
 
     broadcast!((x,y,z)->(((x-y)/z)^2),isf_m,isf,isf_m,isf_error);
     mean!(fitness',isf_m);
 
-    broadcast!((x,y,z)->(((x-y)/z)^2),inverse_first_moments,inverse_first_moment,inverse_first_moments,inverse_first_moment_error);
-    
-    fitness .+= inverse_first_moments;
-    fitness .+= (first_moments .- first_moment).^2;
+    if use_inverse_first_moment
+        broadcast!((x,y,z)->(((x-y)/z)^2),inverse_first_moments,inverse_first_moment,inverse_first_moments,inverse_first_moment_error);
+        fitness .+= inverse_first_moments;
+    end
+
+    if first_moment > 0.0
+        fitness .+= (first_moments .- first_moment).^2;
+    end
+    if third_moment > 0.0
+        broadcast!((x,y,z)->(((x-y)/z)^2),third_moments,third_moment,third_moments,third_moment_error);
+        fitness .+= third_moments;
+    end
 
     crossover_probs = ones(npop) .* crossoverProb;
     differential_weights = ones(npop) .* differentialWeight;
@@ -358,24 +388,40 @@ function deac(  imaginary_time::Array{Float64,1},
         mutate(rng,P_new,P,mIdx,new_differential_weights);
 
         # Normalization
-        mul!(normalization,P_new',dfrequency3);
-        normalization ./= moment0;
-        P_new ./= normalization';
+        if normalize
+            mul!(normalization,P_new',dfrequency3);
+            normalization ./= moment0;
+            P_new ./= normalization';
 
         #Rejection
-        mul!(first_moments', first_moments_term', P_new);
+        if first_moment > 0.0
+            mul!(first_moments', first_moments_term', P_new);
+        end
+
+        if third_moment > 0.0
+            mul!(third_moments', third_moments_term', P_new);
+        end
 
         mul!(isf_m,isf_term,P_new);
 
-        mul!(inverse_first_moments,isf_m',dimaginary_time);
+        if use_inverse_first_moment
+            mul!(inverse_first_moments,isf_m',dimaginary_time);
+        end
 
         broadcast!((x,y,z)->(((x-y)/z)^2),isf_m,isf,isf_m,isf_error);
         mean!(fitness_new',isf_m);
 
-        broadcast!((x,y,z)->(((x-y)/z)^2),inverse_first_moments,inverse_first_moment,inverse_first_moments,inverse_first_moment_error);
+        if use_inverse_first_moment
+            broadcast!((x,y,z)->(((x-y)/z)^2),inverse_first_moments,inverse_first_moment,inverse_first_moments,inverse_first_moment_error);
+            fitness_new .+= inverse_first_moments;
+        if first_moment > 0.0
+            fitness_new .+= (first_moments .- first_moment).^2;
+        end
 
-        fitness_new .+= inverse_first_moments;
-        fitness_new .+= (first_moments .- first_moment).^2;
+        if third_moment > 0.0
+            broadcast!((x,y,z)->(((x-y)/z)^2),third_moments,third_moment,third_moments,third_moment_error);
+            fitness_new .+= third_moments;
+        end
 
         reject(rng,rInd,fitness_new,fitness);
         replace_pop(P,P_new,rInd);

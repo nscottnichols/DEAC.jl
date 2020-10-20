@@ -28,10 +28,24 @@ function parse_commandline()
             help = "Maximum frequency to explore."
             arg_type = Float64
             default = 60.0
+        "--normalize"
+            help = "Normalize spectrum to the zeroeth moment."
+            action = :store_true
+        "--use_inverse_first_moment"
+            help = "Calculate inverse first moment from ISF data and use it in fitness."
+            action = :store_true
         "--first_moment"
             help = "FIXME First moment."
             arg_type = Float64
             default = 1.0
+        "--third_moment"
+            help = "FIXME Third moment."
+            arg_type = Float64
+            default = -1.0
+        "--third_moment_error"
+            help = "FIXME Third moment."
+            arg_type = Float64
+            default = 0.01
         "--crossover_probability", "-r"
             help = "Initial probability for parent gene to become mutant vector gene."
             arg_type = Float64
@@ -159,7 +173,11 @@ function main()
     stdFitness,P,
     fitnessP,rng,
     crossover_probs,differential_weights = DEAC.deac( tau,isf,err,frequency_bins,
+                           use_inverse_first_moment = parse_args["use_inverse_first_moment"],
+                           normalize = parse_args["normalize"],
                            first_moment = parsed_args["first_moment"],
+                           third_moment = parsed_args["third_moment"],
+                           third_moment_error = parsed_args["third_moment_error"],
                            temperature = parsed_args["temperature"],
                            number_of_generations = parsed_args["number_of_generations"],
                            population_size = parsed_args["population_size"],
@@ -205,6 +223,8 @@ function main()
          "isf_error",err,
          "frequency",frequency_bins,
          "first_moment",parsed_args["first_moment"],
+         "third_moment",parsed_args["third_moment"],
+         "third_moment_error",parsed_args["third_moment_error"],
          "temperature",parsed_args["temperature"],
          "number_of_generations",parsed_args["number_of_generations"],
          "population_size",parsed_args["population_size"],
