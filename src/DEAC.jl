@@ -13,60 +13,6 @@ using LinearAlgebra
 
 export deac
 
-function simpson_nonuniform_odd(x::Array{Float64,1}, f::Array{Float64,1})
-    N = size(x,1) - 1;
-
-    result = 0.0
-    @inbounds for i in 2:2:N
-        h_i = x[i+1] - x[i]
-        h_im1 = x[i] - x[i-1]
-        hph = h_i + h_im1
-        result += f[i] * ( h_i^3 + h_im1^3 + 3. * h_i * h_im1 * hph ) / ( 6 * h_i * h_im1 )
-        result += f[i - 1] * ( 2. * h_im1^3 - h_i^3 + 3. * h_i * h_im1^2) / ( 6 * h_im1 * hph)
-        result += f[i + 1] * ( 2. * h_i^3 - h_im1^3 + 3. * h_im1 * h_i^2) / ( 6 * h_i * hph )
-    end
-    result
-end
-
-function set_simpson_terms_odd(x::Array{Float64,1})
-    N = size(x,1) - 1;
-    st1 = zeros(div(N,2));
-    st2 = zeros(div(N,2));
-    st3 = zeros(div(N,2));
-    @inbounds for i in 2:2:N
-        j = div(i,2)
-        h_i = x[i+1] - x[i]
-        h_im1 = x[i] - x[i-1]
-        hph = h_i + h_im1
-        st1[j] = ( h_i^3 + h_im1^3 + 3. * h_i * h_im1 * hph ) / ( 6 * h_i * h_im1 )
-        st2[j] = ( 2. * h_im1^3 - h_i^3 + 3. * h_i * h_im1^2) / ( 6 * h_im1 * hph)
-        st3[j] = ( 2. * h_i^3 - h_im1^3 + 3. * h_im1 * h_i^2) / ( 6 * h_i * hph )
-    end
-    st1,st2,st3
-end
-
-function simpson_nonuniform_odd(f::Array{Float64,1},st1::Array{Float64,1},st2::Array{Float64,1},st3::Array{Float64,1})
-    N = size(st1,1);
-
-    result = 0.0
-    @inbounds for j in 1:N
-        i = 2*j
-        result += f[i - 1] * st2[j] + f[i] * st1[j] + f[i + 1] * st3[j]
-    end
-    result
-end
-
-function simpson_nonuniform_odd_error(f::Array{Float64,1},st1::Array{Float64,1},st2::Array{Float64,1},st3::Array{Float64,1})
-    N = size(st1,1);
-
-    result = 0.0
-    @inbounds for j in 1:N
-        i = 2*j
-        result += (f[i - 1]^2) * st2[j] + (f[i]^2) * st1[j] + (f[i + 1]^2) * st3[j]
-    end
-    sqrt(result)
-end
-
 function mutant_indexes(rng::MersenneTwister,populationSize::Int64,idx0::Int64)
     idx1 = idx0;
     idx2 = idx0;
@@ -89,7 +35,8 @@ function set_differential_weights(rng::MersenneTwister,new_differential_weights:
                               SAdifferentialWeightShift::Float64,SAdifferentialWeight::Float64)
     @inbounds for i = eachindex(new_differential_weights)
         if rand(rng) < SAdifferentialWeightProb
-            new_differential_weights[i] = SAdifferentialWeightShift + SAdifferentialWeight*rand(rng);
+            #new_differential_weights[i] = SAdifferentialWeightShift + SAdifferentialWeight*rand(rng);
+            new_differential_weights[i] = 2.0*rand(rng);
         else
             new_differential_weights[i] = differential_weights[i];
         end
@@ -182,19 +129,13 @@ function set_isf_term(imaginary_time::Array{Float64,1},frequency_bins::Array{Flo
     isf_term = Array{Float64,2}(undef,size(imaginary_time,1),size(frequency_bins,1));
     for i in 1:size(imaginary_time,1)
         t = imaginary_time[i];
+        bo2mt = b/2 - t;
         for j in 1:size(frequency_bins,1)
             f = frequency_bins[j];
-            isf_term[i,j] = (exp(-t*f) + exp(-(b - t)*f))/(1 + exp(-b*f));
+            isf_term[i,j] = cosh(bo2mt*f);
         end
     end
     isf_term
-end
-
-function set_inverse_first_moment_fitness(inverse_first_moments::Array{Float64,1}, inverse_first_moment::Float64, inverse_first_moment_error::Float64)
-    @inbounds for i in 1:size(inverse_first_moments,1)
-        inverse_first_moments[i] = ((inverse_first_moments[i] - inverse_first_moment)/inverse_first_moment_error)^2;
-    end
-    nothing
 end
 
 function deac(  imaginary_time::Array{Float64,1},
@@ -268,8 +209,10 @@ function deac(  imaginary_time::Array{Float64,1},
 
     # Normalize population
     if normalize
+        normalization_factor = cosh.((beta/2) .* frequency);
+        normalization_term = normalization_factor .* dfrequency3;
         normalization = Array{Float64,1}(undef,npop);
-        mul!(normalization,P',dfrequency3);
+        mul!(normalization,P',normalization_term);
         normalization ./= moment0;
         P ./= normalization';
     end
@@ -278,7 +221,7 @@ function deac(  imaginary_time::Array{Float64,1},
     fitness_new = Array{Float64,1}(undef,npop);
 
     if first_moment > 0.0
-        first_moments_factor = frequency .* tanh.((beta/2) .* frequency);
+        first_moments_factor = frequency .* sinh.((beta/2) .* frequency);
         first_moments_term = first_moments_factor .* dfrequency;
         first_moments_term2 = first_moments_factor .* dfrequency2;
         first_moments_term .+= first_moments_term2;
@@ -291,7 +234,7 @@ function deac(  imaginary_time::Array{Float64,1},
     end
 
     if third_moment > 0.0
-        third_moments_factor = (frequency .^ 3) .* tanh.((beta/2) .* frequency);
+        third_moments_factor = (frequency .^ 3) .* sinh.((beta/2) .* frequency);
         third_moments_term = third_moments_factor .* dfrequency;
         third_moments_term2 = third_moments_factor .* dfrequency2;
         third_moments_term .+= third_moments_term2;
@@ -389,9 +332,10 @@ function deac(  imaginary_time::Array{Float64,1},
 
         # Normalization
         if normalize
-            mul!(normalization,P_new',dfrequency3);
+            mul!(normalization,P_new',normalization_term);
             normalization ./= moment0;
             P_new ./= normalization';
+        end
 
         #Rejection
         if first_moment > 0.0
@@ -414,6 +358,8 @@ function deac(  imaginary_time::Array{Float64,1},
         if use_inverse_first_moment
             broadcast!((x,y,z)->(((x-y)/z)^2),inverse_first_moments,inverse_first_moment,inverse_first_moments,inverse_first_moment_error);
             fitness_new .+= inverse_first_moments;
+        end
+
         if first_moment > 0.0
             fitness_new .+= (first_moments .- first_moment).^2;
         end
@@ -434,11 +380,11 @@ function deac(  imaginary_time::Array{Float64,1},
     minidx = argmin(fitness);
     set_minP(minP,P,minidx);
 
-    minS = minP./(1 .+ exp.(-beta .* frequency)); 
+    minS = minP .* exp.((beta/2) .* frequency) ./ 2; 
     println(minimum(fitness));
     if track_stats
-        return u4,frequency,minS,minP,minimum(fitness),avgFitness[1:generation],minFitness[1:generation],stdFitness[1:generation],P,fitness,rng,crossover_probs,differential_weights
+        return u4,frequency,minS,minP,minimum(fitness),generation,avgFitness[1:generation],minFitness[1:generation],stdFitness[1:generation],P,fitness,rng,crossover_probs,differential_weights
     end
-    return u4,frequency,minS,minP,minimum(fitness),zeros(2),zeros(2),zeros(2),P,fitness,rng,crossover_probs,differential_weights
+    return u4,frequency,minS,minP,minimum(fitness),generation,zeros(2),zeros(2),zeros(2),P,fitness,rng,crossover_probs,differential_weights
 end
 end
