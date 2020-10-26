@@ -28,6 +28,9 @@ function parse_commandline()
             help = "Maximum frequency to explore."
             arg_type = Float64
             default = 60.0
+        "--smooth"
+            help = "Use smoothing factor in fitness."
+            action = :store_true
         "--normalize"
             help = "Normalize spectrum to the zeroeth moment."
             action = :store_true
@@ -174,6 +177,7 @@ function main()
     fitnessP,rng,
     crossover_probs,differential_weights = DEAC.deac( tau,isf,err,frequency_bins,
                            use_inverse_first_moment = parsed_args["use_inverse_first_moment"],
+                           smooth = parsed_args["smooth"],
                            normalize = parsed_args["normalize"],
                            first_moment = parsed_args["first_moment"],
                            third_moment = parsed_args["third_moment"],

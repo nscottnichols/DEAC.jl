@@ -138,10 +138,22 @@ function set_isf_term(imaginary_time::Array{Float64,1},frequency_bins::Array{Flo
     isf_term
 end
 
+function beam_distance(d::Array{Float64,1},frequency::Array{Float64,1},P::Array{Float64,2})
+    #FIXME this method is slow
+    for j in 1:(size(P,2))
+        d[j] = 1.0;
+        for i in 1:(size(frequency,1) - 2)
+            d[j] += abs((P[i+2,j] - P[i,j])*frequency[i+1] - (frequency[i+2] - frequency[i])*P[i+1,j] + frequency[i+2]*P[i,j] - frequency[i]*P[i+2,j])/sqrt((frequency[i+2] - frequency[i])^2 + (P[i+2,j] - P[i,j])^2);
+        end
+        nothing
+    end
+end
+
 function deac(  imaginary_time::Array{Float64,1},
                 isf::Array{Float64,1},
                 isf_error::Array{Float64,1},
                 frequency::Array{Float64,1};
+                smooth::Bool = false,
                 normalize::Bool = false,
                 use_inverse_first_moment::Bool = false,
                 first_moment::Float64 = -1.0,
@@ -280,6 +292,12 @@ function deac(  imaginary_time::Array{Float64,1},
         fitness .+= third_moments;
     end
 
+    if smooth
+        total_beam_distances = Array{Float64,1}(undef,npop);
+        beam_distance(total_beam_distances,frequency,P);
+        fitness .*= total_beam_distances.^2;
+    end
+
     crossover_probs = ones(npop) .* crossoverProb;
     differential_weights = ones(npop) .* differentialWeight;
     new_crossover_probs = Array{Float64,1}(undef,npop);
@@ -367,6 +385,11 @@ function deac(  imaginary_time::Array{Float64,1},
         if third_moment > 0.0
             broadcast!((x,y,z)->(((x-y)/z)^2),third_moments,third_moment,third_moments,third_moment_error);
             fitness_new .+= third_moments;
+        end
+
+        if smooth
+            beam_distance(total_beam_distances,frequency,P_new);
+            fitness_new .*= total_beam_distances.^2;
         end
 
         reject(rng,rInd,fitness_new,fitness);
