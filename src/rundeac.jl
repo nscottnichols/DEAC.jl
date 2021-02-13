@@ -28,6 +28,9 @@ function parse_commandline()
             help = "Maximum frequency to explore."
             arg_type = Float64
             default = 60.0
+        "--smooth"
+            help = "Use smoothing factor in fitness."
+            action = :store_true
         "--normalize"
             help = "Normalize spectrum to the zeroeth moment."
             action = :store_true
@@ -37,7 +40,7 @@ function parse_commandline()
         "--first_moment"
             help = "FIXME First moment."
             arg_type = Float64
-            default = 1.0
+            default = -1.0
         "--third_moment"
             help = "FIXME Third moment."
             arg_type = Float64
@@ -168,12 +171,13 @@ function main()
     isf = qmcdata["isf"];
     err = qmcdata["error"];
 
-    u4,omega,minS,minP,minFit,
+    u4,omega,minS,minP,minFit,total_generations,
     avgFitness,minFitness,
     stdFitness,P,
     fitnessP,rng,
     crossover_probs,differential_weights = DEAC.deac( tau,isf,err,frequency_bins,
                            use_inverse_first_moment = parsed_args["use_inverse_first_moment"],
+                           smooth = parsed_args["smooth"],
                            normalize = parsed_args["normalize"],
                            first_moment = parsed_args["first_moment"],
                            third_moment = parsed_args["third_moment"],
@@ -202,6 +206,7 @@ function main()
          "dsf",minS,
          "minP",minP,
          "minFit",minFit,
+         "total_generations",total_generations,
          "elapsed_time",elapsed);
 
     if parsed_args["track_stats"]
